@@ -1,11 +1,11 @@
 """
-Author: @JulioUrena (modified for PTH support by @5epi0l)
+Author: @JulioUrena (modified for PTH support by @5epi0l and Kerberos Support by @Officerwasu)
 License: GPL-3.0 license
 """
 
 import argparse
 import sys
-from ldap3 import Server, Connection, ALL, NTLM, MODIFY_ADD
+from ldap3 import Server, Connection, ALL, NTLM, MODIFY_ADD, GSSAPI, SASL
 
 # Parse arguments
 parser = argparse.ArgumentParser(description='Add a user to an Active Directory group using LDAP.')
@@ -15,6 +15,7 @@ parser.add_argument('-a', '--adduser', required=True, help='The username of the 
 parser.add_argument('-u', '--user', required=True, help='The username with AddMember privilege.')
 parser.add_argument('-p', '--password', help='Password of the user (optional if --hash is provided).')
 parser.add_argument('--hash', help='NTLM hash in the format LMHASH:NTHASH (LMHASH usually set to aad3b435b51404eeaad3b435b51404ee).')
+parser.add_argument('-k', '--kerberos', action='store_true', help='Use Kerberos authentication. (Uses KRB5CCNAME environment variable)')
 
 args = parser.parse_args()
 
@@ -25,10 +26,11 @@ user_name = args.adduser
 ad_username = args.user
 ad_password = args.password
 ad_hash = args.hash
+use_kerberos = args.kerberos
 
 # Validate authentication
-if not ad_password and not ad_hash:
-    print('[-] Error: Provide either --password or --hash for authentication.')
+if not ad_password and not ad_hash and not use_kerberos:
+    print('[-] Error: Provide either --password, --hash, or --kerberos for authentication.')
     sys.exit(1)
 
 # Construct search base
@@ -37,19 +39,29 @@ search_base = 'dc=' + ',dc='.join(domain_name.split('.'))
 # Prepare connection
 server = Server(domain_name, get_info=ALL)
 
-if ad_hash:
-    # Use hash for authentication
-    password_field = ad_hash
-else:
-    # Use plain-text password
-    password_field = ad_password
+if use_kerberos:
+    conn = Connection(
+        server,
+        authentication=SASL,
+        sasl_mechanism='GSSAPI'
+    )
 
-conn = Connection(
-    server,
-    user=f'{domain_name}\\{ad_username}',
-    password=password_field,
-    authentication=NTLM
-)
+elif ad_hash:
+    conn = Connection(
+        server,
+        user=f'{domain_name}\\{ad_username}',
+        authentication = NTLM,
+        password_field = ad_hash
+    )
+
+else:
+    conn = Connection(
+        server,
+        user=f'{domain_name}\\{ad_username}',        
+        authentication = NTLM,
+        password_field = ad_password
+    )
+
 
 # Bind to AD
 if conn.bind():
